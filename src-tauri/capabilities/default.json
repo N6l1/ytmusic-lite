@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Minimal capabilities. The app loads a remote page that does not use Tauri IPC; all control happens Rust-side via eval, so only core defaults are granted.",
+  "description": "Grants the remote YouTube Music page access to our two custom IPC commands (update_presence / clear_presence) so it can report the now-playing track for Discord Rich Presence. Only those app-defined commands are reachable.",
   "windows": ["main"],
+  "remote": {
+    "urls": ["https://music.youtube.com"]
+  },
   "permissions": [
     "core:default"
   ]

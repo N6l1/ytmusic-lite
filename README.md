@@ -123,6 +123,36 @@ npm run icon         # = tauri icon app-icon.png
 
 ---
 
+## Discord Rich Presence (optional — "Listening to YouTube Music")
+
+Shows the song you're playing in your Discord activity, Spotify-style. It's
+**off by default** because it needs a (free) Discord Application ID. One-time setup:
+
+1. Go to <https://discord.com/developers/applications> → **New Application**.
+2. **Name it `YouTube Music`** — this name is what appears after "Listening to".
+   (Optional: under *Rich Presence → Art Assets*, upload a logo if you want a
+   fallback image.)
+3. On the **General Information** page, copy the **Application ID**.
+4. Paste it into `src-tauri/src/lib.rs`:
+   ```rust
+   const DISCORD_CLIENT_ID: &str = "your-application-id-here";
+   ```
+5. Rebuild (`npm run build`) and run. Make sure the **Discord desktop app** is
+   running (browser Discord won't work).
+
+Now playing a song shows **Listening to YouTube Music**, with the track title,
+artist, cover art, and a live progress bar. Pausing removes the timer; closing
+the app clears it. Selectors for reading the track live in `config.js` under
+`discord`. If Discord isn't running, the feature simply stays idle.
+
+> Privacy note: enabling this exposes two custom commands (`update_presence`,
+> `clear_presence`) to the music.youtube.com page via the capability in
+> `src-tauri/capabilities/default.json`. They only forward the now-playing text
+> to your local Discord — nothing else is reachable. Leaving `DISCORD_CLIENT_ID`
+> empty disables the whole feature server-side regardless.
+
+---
+
 ## 4. Where the fragile bits live — **`src-tauri/injected/config.js`**
 
 Everything that depends on YouTube Music's HTML is isolated in **one file**:

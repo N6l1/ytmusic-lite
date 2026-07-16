@@ -247,6 +247,81 @@
   };
 
   /* -------------------------------------------------------------------------
+   * 5b. DISCORD RICH PRESENCE reporter
+   *     Reads the now-playing track and pushes it to Rust (which talks to the
+   *     Discord IPC pipe). We only send on real changes — track / play-state /
+   *     seek — never per-second, to stay under Discord's rate limit.
+   * ---------------------------------------------------------------------- */
+  var DSC = CFG.discord || {};
+  var dstate = { sig: '', timer: 0, videoHooked: null };
+
+  function tauriInvoke(cmd, args) {
+    try {
+      if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
+        return window.__TAURI__.core.invoke(cmd, args);
+      }
+      if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
+        return window.__TAURI_INTERNALS__.invoke(cmd, args);
+      }
+    } catch (e) {}
+  }
+
+  function textOf(list) {
+    var el = pick(list);
+    return el ? (el.getAttribute('title') || el.textContent || '').trim() : '';
+  }
+
+  function reportDiscord() {
+    if (!DSC.enabled) return;
+    var video = pick(SEL.videoEl);
+    var title = textOf(DSC.title);
+    if (!title) {
+      // Nothing loaded — clear presence once.
+      if (dstate.sig !== 'CLEARED') { dstate.sig = 'CLEARED'; tauriInvoke('clear_presence'); }
+      return;
+    }
+    // Byline is "Artist • Album • Year" — keep the artist (first segment).
+    var artist = textOf(DSC.artist).split('•')[0].trim();
+    var art = '';
+    var img = pick(DSC.art);
+    if (img) art = img.currentSrc || img.src || '';
+    var playing = !!(video && !video.paused && !video.ended);
+    var position = video && isFinite(video.currentTime) ? video.currentTime : 0;
+    var duration = video && isFinite(video.duration) ? video.duration : 0;
+
+    // Signature omits position so ticking doesn't spam; play/seek events resend.
+    var sig = [title, artist, playing ? 1 : 0].join('');
+    if (sig === dstate.sig) return;
+    dstate.sig = sig;
+    tauriInvoke('update_presence', {
+      playing: playing,
+      title: title,
+      artist: artist,
+      art: art,
+      position: position,
+      duration: duration,
+    });
+  }
+
+  function scheduleDiscord() {
+    if (dstate.timer) return;
+    dstate.timer = setTimeout(function () { dstate.timer = 0; reportDiscord(); }, 700);
+  }
+
+  // Attach video listeners so play/pause/seek/track-change push an update.
+  function hookDiscordVideo() {
+    if (!DSC.enabled) return;
+    var video = pick(SEL.videoEl);
+    if (!video || dstate.videoHooked === video) return;
+    dstate.videoHooked = video;
+    ['play', 'pause', 'ended', 'seeked', 'loadedmetadata'].forEach(function (ev) {
+      video.addEventListener(ev, function () { dstate.sig = ''; scheduleDiscord(); });
+    });
+    scheduleDiscord();
+  }
+  window.__ytmLite.reportDiscord = reportDiscord; // manual trigger for debugging
+
+  /* -------------------------------------------------------------------------
    * 6. TIMER THROTTLING WHEN HIDDEN
    *    Chromium already throttles background timers & pauses rAF when the doc
    *    is hidden (audio keeps playing natively). We add a belt-and-suspenders
@@ -283,7 +358,11 @@
     injectCSS();
     selectSong();
     if (!alreadyLow()) setLowQuality(false);
+    hookDiscordVideo();
+    scheduleDiscord();
   }
+  // Tidy up the Discord activity when the window/page goes away.
+  window.addEventListener('beforeunload', function () { tauriInvoke('clear_presence'); });
   var mo = new MutationObserver(function () {
     // Debounced via rAF-ish micro throttle to avoid churn.
     if (mo._t) return;

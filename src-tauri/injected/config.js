@@ -100,6 +100,30 @@ window.YTM_CFG = {
   hideVideoElement: true, // CSS-hide the <video> to save compositing/GPU
   throttleWhenHidden: true, // slow our own timers when the window is hidden
 
+  /* ---- Discord Rich Presence --------------------------------------------
+   * Shows "Listening to YouTube Music" + the current song in your Discord
+   * activity (like Spotify). Requires a Discord Application ID set in
+   * src-tauri/src/lib.rs (DISCORD_CLIENT_ID) and the Discord desktop app
+   * running. These selectors read the now-playing track from the player bar. */
+  discord: {
+    enabled: true,
+    title: [
+      'ytmusic-player-bar .title.ytmusic-player-bar',
+      'ytmusic-player-bar .title',
+      'ytmusic-player-bar yt-formatted-string.title',
+    ],
+    artist: [
+      'ytmusic-player-bar .byline.ytmusic-player-bar',
+      'ytmusic-player-bar .byline',
+      'ytmusic-player-bar yt-formatted-string.byline',
+    ],
+    art: [
+      'ytmusic-player-bar img.image',
+      'ytmusic-player-bar .thumbnail img',
+      'ytmusic-player-bar #thumbnail img',
+    ],
+  },
+
   /* localStorage keys used to remember one-time actions across launches. */
   storageKeys: {
     qualitySet: 'ytmLite.lowQualitySet.v1',
