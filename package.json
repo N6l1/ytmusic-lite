@@ -1,0 +1,16 @@
+{
+  "name": "ytmusic-lite",
+  "version": "0.1.0",
+  "description": "Super-lightweight YouTube Music desktop player built on Tauri + WebView2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icon": "tauri icon app-icon.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}
