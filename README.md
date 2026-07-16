@@ -33,6 +33,10 @@ Just want to use it? You don't need any of the developer tools below.
 4. Launch **YTMusic Lite** from the Start menu or desktop, then sign into your
    Google account in the window and play something.
 
+Your **sign-in is remembered** — once you log into Google, the session is stored
+in the app's own WebView2 profile and restored on every launch, so you won't have
+to log in again.
+
 Requirements: 64-bit Windows 10/11. The **WebView2 runtime** is used for
 rendering; it ships with Windows 11 and recent Windows 10, and if it's missing
 the installer downloads it automatically. No Rust/Node needed to *run* the app —

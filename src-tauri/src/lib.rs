@@ -78,6 +78,16 @@ pub fn run() {
                 .build(),
         )
         .setup(move |app| {
+            // Pin the WebView2 profile (cookies, localStorage — i.e. your signed-in
+            // Google session) to a fixed folder instead of relying on Tauri's default
+            // derivation. This guarantees the login survives Tauri upgrades, identifier
+            // tweaks, or moving the exe. It resolves to the SAME path Tauri already used
+            // (%LOCALAPPDATA%\com.ytmlite.app), so existing sign-ins are preserved.
+            let data_dir = app
+                .path()
+                .app_local_data_dir()
+                .expect("resolve app local data dir");
+
             // ---- Main window: load YT Music directly, inject our scripts ----
             let win = WebviewWindowBuilder::new(
                 app,
@@ -87,6 +97,7 @@ pub fn run() {
             .title("YTMusic Lite")
             .inner_size(1000.0, 720.0)
             .min_inner_size(480.0, 320.0)
+            .data_directory(data_dir)
             .initialization_script(CONFIG_JS)
             .initialization_script(INJECT_JS)
             .build()?;
