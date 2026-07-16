@@ -1,0 +1,31 @@
+[package]
+name = "ytmusic-lite"
+version = "0.1.0"
+description = "Super-lightweight YouTube Music player"
+authors = ["you"]
+edition = "2021"
+rust-version = "1.77"
+
+# The library that the binary and the Tauri mobile harness both use.
+[lib]
+name = "ytmusic_lite_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Aggressive size optimization for the release binary.
+[profile.release]
+opt-level = "z"     # optimize for size
+lto = true          # link-time optimization
+codegen-units = 1   # better optimization, slower compile
+panic = "abort"     # no unwinding tables
+strip = true        # strip symbols
