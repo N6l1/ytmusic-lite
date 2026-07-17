@@ -16,7 +16,7 @@ use discord_rich_presence::{
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    Listener, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_window_state::{StateFlags, WindowExt};
@@ -66,6 +66,27 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Lightweight diagnostic log (temp\ytmlite-rpc.log). Helps trace the Discord
+/// pipeline without DevTools in a release build.
+fn dlog(msg: &str) {
+    use std::io::Write;
+    let path = std::env::temp_dir().join("ytmlite-rpc.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "[{}] {}", now_ms(), msg);
+    }
+}
+
+/// Payload emitted by the injected page script on the `ytmlite://presence` event.
+#[derive(serde::Deserialize)]
+struct PresencePayload {
+    playing: bool,
+    title: String,
+    artist: String,
+    art: Option<String>,
+    position: Option<f64>,
+    duration: Option<f64>,
+}
+
 /// Discord requires each presence string to be 2..=128 chars. Clamp/pad safely.
 fn fit(s: &str) -> String {
     let t = s.trim();
@@ -79,30 +100,28 @@ fn fit(s: &str) -> String {
     out
 }
 
-/// Called by the injected script whenever the track or play-state changes.
 /// Publishes a Spotify-style "Listening to …" activity to the local Discord app.
-#[tauri::command]
-fn update_presence(
-    discord: tauri::State<'_, Discord>,
-    playing: bool,
-    title: String,
-    artist: String,
-    art: Option<String>,
-    position: Option<f64>,
-    duration: Option<f64>,
-) {
+/// Driven by the `ytmlite://presence` event emitted from the page.
+fn set_presence(app: &tauri::AppHandle, p: PresencePayload) {
+    dlog(&format!("presence playing={} title={:?} artist={:?}", p.playing, p.title, p.artist));
     if DISCORD_CLIENT_ID.is_empty() {
         return; // feature disabled — no client id set
     }
+    let discord = app.state::<Discord>();
     let mut guard = discord.0.lock().unwrap();
 
     // (Re)establish the IPC connection if needed. If Discord isn't running this
     // just fails quietly and we retry on the next update.
     if guard.is_none() {
-        if let Ok(mut c) = DiscordIpcClient::new(DISCORD_CLIENT_ID) {
-            if c.connect().is_ok() {
-                *guard = Some(c);
-            }
+        match DiscordIpcClient::new(DISCORD_CLIENT_ID) {
+            Ok(mut c) => match c.connect() {
+                Ok(_) => {
+                    dlog("discord connected");
+                    *guard = Some(c);
+                }
+                Err(e) => dlog(&format!("discord connect FAILED: {e}")),
+            },
+            Err(e) => dlog(&format!("discord client new FAILED: {e}")),
         }
     }
     let client = match guard.as_mut() {
@@ -110,15 +129,15 @@ fn update_presence(
         None => return,
     };
 
-    let details = fit(&title);
-    let state = fit(&artist);
-    let art_url = art.filter(|u| u.starts_with("http"));
-    let has_time = playing
-        && duration.map(|d| d > 0.0).unwrap_or(false)
-        && position.map(|p| p >= 0.0).unwrap_or(false);
+    let details = fit(&p.title);
+    let state = fit(&p.artist);
+    let art_url = p.art.filter(|u| u.starts_with("http"));
+    let has_time = p.playing
+        && p.duration.map(|d| d > 0.0).unwrap_or(false)
+        && p.position.map(|q| q >= 0.0).unwrap_or(false);
     let (start, end) = if has_time {
-        let s = now_ms() - (position.unwrap() * 1000.0) as i64;
-        (s, s + (duration.unwrap() * 1000.0) as i64)
+        let s = now_ms() - (p.position.unwrap() * 1000.0) as i64;
+        (s, s + (p.duration.unwrap() * 1000.0) as i64)
     } else {
         (0, 0)
     };
@@ -140,20 +159,25 @@ fn update_presence(
         act
     };
 
-    if client.set_activity(build()).is_err() {
-        // Pipe likely died (Discord restarted). Reconnect once and retry.
-        if client.reconnect().is_ok() {
-            let _ = client.set_activity(build());
-        } else {
-            *guard = None;
+    match client.set_activity(build()) {
+        Ok(_) => dlog("set_activity OK"),
+        Err(e) => {
+            dlog(&format!("set_activity err: {e}; reconnecting"));
+            // Pipe likely died (Discord restarted). Reconnect once and retry.
+            if client.reconnect().is_ok() {
+                let _ = client.set_activity(build());
+            } else {
+                *guard = None;
+            }
         }
     }
 }
 
 /// Clears the Discord activity (nothing playing, or app closing).
-#[tauri::command]
-fn clear_presence(discord: tauri::State<'_, Discord>) {
-    if let Some(client) = discord.0.lock().unwrap().as_mut() {
+fn clear_presence(app: &tauri::AppHandle) {
+    let discord = app.state::<Discord>();
+    let mut guard = discord.0.lock().unwrap();
+    if let Some(client) = guard.as_mut() {
         let _ = client.clear_activity();
     }
 }
@@ -198,8 +222,20 @@ pub fn run() {
                 .build(),
         )
         .manage(Discord::default())
-        .invoke_handler(tauri::generate_handler![update_presence, clear_presence])
         .setup(move |app| {
+            // ---- Discord Rich Presence: listen for now-playing events from the
+            // page. Custom commands can't be granted to a remote origin's ACL, but
+            // the core event system can — so the injected script emits events. ----
+            let h_pres = app.handle().clone();
+            app.listen_any("ytmlite://presence", move |event| {
+                match serde_json::from_str::<PresencePayload>(event.payload()) {
+                    Ok(p) => set_presence(&h_pres, p),
+                    Err(e) => dlog(&format!("bad presence payload: {e}")),
+                }
+            });
+            let h_clear = app.handle().clone();
+            app.listen_any("ytmlite://clear", move |_| clear_presence(&h_clear));
+
             // Pin the WebView2 profile (cookies, localStorage — i.e. your signed-in
             // Google session) to a fixed folder instead of relying on Tauri's default
             // derivation. This guarantees the login survives Tauri upgrades, identifier

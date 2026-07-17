@@ -175,10 +175,12 @@
       // Keep the <video> in the DOM (player logic needs it) but stop painting it.
       css += 'ytmusic-player .html5-video-container,ytmusic-player video{opacity:0 !important}';
     }
+    var root = document.head || document.documentElement;
+    if (!root) return; // document-start: no root yet — retried via observer/DCL
     var style = document.createElement('style');
     style.id = 'ytm-lite-style';
     style.textContent = css;
-    (document.head || document.documentElement).appendChild(style);
+    root.appendChild(style);
   }
   // documentElement exists at document-start; head arrives a moment later.
   injectCSS();
@@ -255,15 +257,16 @@
   var DSC = CFG.discord || {};
   var dstate = { sig: '', timer: 0, videoHooked: null };
 
-  function tauriInvoke(cmd, args) {
+  // Page -> Rust via the Tauri EVENT system. (Custom commands can't be granted
+  // to a remote origin's ACL; core events can, so we use events.)
+  function emit(event, payload) {
     try {
-      if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke) {
-        return window.__TAURI__.core.invoke(cmd, args);
-      }
-      if (window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke) {
-        return window.__TAURI_INTERNALS__.invoke(cmd, args);
+      if (window.__TAURI__ && window.__TAURI__.event && window.__TAURI__.event.emit) {
+        window.__TAURI__.event.emit(event, payload || {});
+        return true;
       }
     } catch (e) {}
+    return false;
   }
 
   function textOf(list) {
@@ -277,7 +280,7 @@
     var title = textOf(DSC.title);
     if (!title) {
       // Nothing loaded — clear presence once.
-      if (dstate.sig !== 'CLEARED') { dstate.sig = 'CLEARED'; tauriInvoke('clear_presence'); }
+      if (dstate.sig !== 'CLEARED') { dstate.sig = 'CLEARED'; emit('ytmlite://clear'); }
       return;
     }
     // Byline is "Artist • Album • Year" — keep the artist (first segment).
@@ -293,7 +296,7 @@
     var sig = [title, artist, playing ? 1 : 0].join('');
     if (sig === dstate.sig) return;
     dstate.sig = sig;
-    tauriInvoke('update_presence', {
+    emit('ytmlite://presence', {
       playing: playing,
       title: title,
       artist: artist,
@@ -362,7 +365,7 @@
     scheduleDiscord();
   }
   // Tidy up the Discord activity when the window/page goes away.
-  window.addEventListener('beforeunload', function () { tauriInvoke('clear_presence'); });
+  window.addEventListener('beforeunload', function () { emit('ytmlite://clear'); });
   var mo = new MutationObserver(function () {
     // Debounced via rAF-ish micro throttle to avoid churn.
     if (mo._t) return;

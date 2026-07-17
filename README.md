@@ -145,11 +145,12 @@ artist, cover art, and a live progress bar. Pausing removes the timer; closing
 the app clears it. Selectors for reading the track live in `config.js` under
 `discord`. If Discord isn't running, the feature simply stays idle.
 
-> Privacy note: enabling this exposes two custom commands (`update_presence`,
-> `clear_presence`) to the music.youtube.com page via the capability in
-> `src-tauri/capabilities/default.json`. They only forward the now-playing text
-> to your local Discord — nothing else is reachable. Leaving `DISCORD_CLIENT_ID`
-> empty disables the whole feature server-side regardless.
+> How it works: the injected script emits a Tauri event (`ytmlite://presence`)
+> carrying the now-playing text; Rust listens for it and forwards it to your
+> local Discord. This uses only the core **event** permission granted to the
+> page in `src-tauri/capabilities/default.json` (app commands can't be granted
+> to a remote origin's ACL, so events are the correct channel). Leaving
+> `DISCORD_CLIENT_ID` empty disables the whole feature.
 
 ---
 

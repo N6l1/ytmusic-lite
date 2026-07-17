@@ -1,10 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Grants the remote YouTube Music page access to our two custom IPC commands (update_presence / clear_presence) so it can report the now-playing track for Discord Rich Presence. Only those app-defined commands are reachable.",
+  "description": "Grants the remote YouTube Music page the core event permission so the injected script can emit now-playing events (ytmlite://presence) that Rust listens for and forwards to Discord Rich Presence. App commands can't be ACL-granted to a remote origin, so we use events instead.",
   "windows": ["main"],
   "remote": {
-    "urls": ["https://music.youtube.com"]
+    "urls": ["https://music.youtube.com", "https://music.youtube.com/*"]
   },
   "permissions": [
     "core:default"
