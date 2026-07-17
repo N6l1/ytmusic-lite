@@ -408,7 +408,7 @@
       mk('p', { 'class': 'sub', text: 'Saved on this device.' }),
       mk('label', { text: 'Discord Application ID' }),
       dcid,
-      mk('div', { 'class': 'hint', text: 'Create one at discord.com/developers, New Application (name it "YouTube Music"), copy its Application ID. Blank = Rich Presence off. Discord desktop must be running.' }),
+      mk('div', { 'class': 'hint', text: 'Create one at discord.com/developers, New Application copy its Application ID. Blank = Rich Presence off. Discord desktop must be running.' }),
       dcStatus,
       mk('label', { text: 'Audio output device' }),
       sink,
