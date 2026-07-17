@@ -256,6 +256,9 @@
    * ---------------------------------------------------------------------- */
   var DSC = CFG.discord || {};
   var dstate = { sig: '', timer: 0, videoHooked: null };
+  var STK = CFG.storageKeys || {};
+  function sGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+  function sSet(k, v) { try { localStorage.setItem(k, v == null ? '' : v); } catch (e) {} }
 
   // Page -> Rust via the Tauri EVENT system. (Custom commands can't be granted
   // to a remote origin's ACL; core events can, so we use events.)
@@ -303,6 +306,7 @@
       art: art,
       position: position,
       duration: duration,
+      clientId: sGet(STK.discordClientId),
     });
   }
 
@@ -318,11 +322,165 @@
     if (!video || dstate.videoHooked === video) return;
     dstate.videoHooked = video;
     ['play', 'pause', 'ended', 'seeked', 'loadedmetadata'].forEach(function (ev) {
-      video.addEventListener(ev, function () { dstate.sig = ''; scheduleDiscord(); });
+      video.addEventListener(ev, function () { dstate.sig = ''; scheduleDiscord(); applySink(); });
     });
     scheduleDiscord();
+    applySink();
   }
   window.__ytmLite.reportDiscord = reportDiscord; // manual trigger for debugging
+
+  /* -------------------------------------------------------------------------
+   * 5c. SETTINGS PANEL — gear button + modal, injected as a fixed overlay so it
+   *     never depends on YT Music's markup. Two settings:
+   *       • Discord Application ID (per-user; drives Rich Presence)
+   *       • Audio output device (routes playback via HTMLMediaElement.setSinkId)
+   * ---------------------------------------------------------------------- */
+  function applySink() {
+    var target = sGet(STK.audioSink) || 'default';
+    var media = document.querySelectorAll('video, audio');
+    for (var i = 0; i < media.length; i++) {
+      var m = media[i];
+      if (typeof m.setSinkId !== 'function' || m.__ytmSink === target) continue;
+      (function (el, t) {
+        el.setSinkId(t).then(function () { el.__ytmSink = t; }).catch(function () {});
+      })(m, target);
+    }
+  }
+  window.__ytmLite.applySink = applySink;
+
+  function settingsCSS() {
+    return '#ytml-gear{position:fixed;right:16px;bottom:88px;z-index:2147483000;width:40px;height:40px;' +
+      'border-radius:50%;background:#212121;color:#fff;display:flex;align-items:center;justify-content:center;' +
+      'font-size:20px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.5);opacity:.55;transition:opacity .15s}' +
+      '#ytml-gear:hover{opacity:1}' +
+      '#ytml-ov{position:fixed;inset:0;z-index:2147483001;background:rgba(0,0,0,.6);display:none;' +
+      'align-items:center;justify-content:center}#ytml-ov.open{display:flex}' +
+      '#ytml-panel{background:#212121;color:#fff;width:min(440px,92vw);border-radius:12px;padding:22px;' +
+      'font-family:Roboto,system-ui,Arial,sans-serif;box-shadow:0 8px 40px rgba(0,0,0,.6)}' +
+      '#ytml-panel h2{margin:0 0 4px;font-size:18px;font-weight:600}' +
+      '#ytml-panel .sub{color:#aaa;font-size:12px;margin:0 0 16px}' +
+      '#ytml-panel label{display:block;font-size:13px;color:#ddd;margin:16px 0 6px;font-weight:500}' +
+      '#ytml-panel input,#ytml-panel select{width:100%;box-sizing:border-box;background:#121212;color:#fff;' +
+      'border:1px solid #383838;border-radius:6px;padding:9px 10px;font-size:13px}' +
+      '#ytml-panel .hint{font-size:11px;color:#8a8a8a;margin-top:5px;line-height:1.4}' +
+      '#ytml-panel .status{font-size:12px;color:#5cc85c;min-height:15px;margin-top:6px}' +
+      '#ytml-panel .foot{display:flex;justify-content:flex-end;margin-top:20px}' +
+      '#ytml-panel button{background:#cd0020;color:#fff;border:0;border-radius:6px;padding:9px 16px;' +
+      'font-size:13px;font-weight:600;cursor:pointer}';
+  }
+
+  var settingsBuilt = false;
+  function buildSettings() {
+    if (settingsBuilt || !document.body) return;
+    settingsBuilt = true;
+
+    function mk(tag, props, kids) {
+      var e = document.createElement(tag);
+      if (props) Object.keys(props).forEach(function (k) {
+        if (k === 'text') e.textContent = props[k];
+        else if (k === 'class') e.className = props[k];
+        else e.setAttribute(k, props[k]);
+      });
+      (kids || []).forEach(function (c) { e.appendChild(c); });
+      return e;
+    }
+
+    var style = document.createElement('style');
+    style.id = 'ytml-settings-style';
+    style.textContent = settingsCSS();
+    (document.head || document.documentElement).appendChild(style);
+
+    var gear = document.createElement('div');
+    gear.id = 'ytml-gear';
+    gear.textContent = '⚙';
+    gear.title = 'YTMusic Lite settings';
+    document.body.appendChild(gear);
+
+    // Built with DOM APIs, NOT innerHTML: YT Music enforces Trusted Types, which
+    // makes any innerHTML assignment throw.
+    var dcid = mk('input', { id: 'ytml-dcid', type: 'text', spellcheck: 'false', placeholder: 'e.g. 1527128686833307678' });
+    var dcStatus = mk('div', { 'class': 'status', id: 'ytml-dc-status' });
+    var sink = mk('select', { id: 'ytml-sink' });
+    var sinkHint = mk('div', { 'class': 'hint', id: 'ytml-sink-hint' });
+    var doneBtn = mk('button', { id: 'ytml-done', text: 'Done' });
+    var panel = mk('div', { id: 'ytml-panel' }, [
+      mk('h2', { text: 'YTMusic Lite — Settings' }),
+      mk('p', { 'class': 'sub', text: 'Saved on this device.' }),
+      mk('label', { text: 'Discord Application ID' }),
+      dcid,
+      mk('div', { 'class': 'hint', text: 'Create one at discord.com/developers, New Application (name it "YouTube Music"), copy its Application ID. Blank = Rich Presence off. Discord desktop must be running.' }),
+      dcStatus,
+      mk('label', { text: 'Audio output device' }),
+      sink,
+      sinkHint,
+      mk('div', { 'class': 'foot' }, [doneBtn]),
+    ]);
+    var ov = mk('div', { id: 'ytml-ov' }, [panel]);
+    document.body.appendChild(ov);
+
+    function openPanel() {
+      dcid.value = sGet(STK.discordClientId);
+      dcStatus.textContent = '';
+      populateSinks(sink, sinkHint);
+      ov.classList.add('open');
+    }
+    function closePanel() { ov.classList.remove('open'); }
+    gear.addEventListener('click', openPanel);
+    doneBtn.addEventListener('click', closePanel);
+    ov.addEventListener('click', function (e) { if (e.target === ov) closePanel(); });
+
+    var idT;
+    dcid.addEventListener('input', function () {
+      clearTimeout(idT);
+      idT = setTimeout(function () {
+        var v = dcid.value.trim();
+        sSet(STK.discordClientId, v);
+        dstate.sig = ''; reportDiscord(); // push the new id to Rust immediately
+        dcStatus.textContent = v ? 'Saved ✓' : 'Rich Presence disabled.';
+      }, 400);
+    });
+
+    sink.addEventListener('change', function () {
+      var opt = sink.options[sink.selectedIndex];
+      sSet(STK.audioSink, sink.value);
+      sSet(STK.audioSinkLabel, opt ? opt.textContent : '');
+      applySink();
+    });
+  }
+
+  function populateSinks(sel, hint) {
+    var canSwitch = typeof HTMLMediaElement !== 'undefined' &&
+      HTMLMediaElement.prototype && HTMLMediaElement.prototype.setSinkId;
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    if (!canSwitch || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      var na = document.createElement('option');
+      na.textContent = 'Not supported here';
+      sel.appendChild(na);
+      hint.textContent = 'This engine cannot switch output devices.';
+      return;
+    }
+    navigator.mediaDevices.enumerateDevices().then(function (devs) {
+      var saved = sGet(STK.audioSink);
+      while (sel.firstChild) sel.removeChild(sel.firstChild);
+      var def = document.createElement('option');
+      def.value = ''; def.textContent = 'System default';
+      sel.appendChild(def);
+      var labelled = false, n = 0;
+      devs.forEach(function (d) {
+        if (d.kind !== 'audiooutput' || d.deviceId === 'default') return;
+        n++;
+        var o = document.createElement('option');
+        o.value = d.deviceId;
+        o.textContent = d.label || ('Output device ' + n);
+        if (d.label) labelled = true;
+        sel.appendChild(o);
+      });
+      sel.value = saved;
+      hint.textContent = (n && !labelled)
+        ? 'Device names are hidden by the browser until permission is granted — selecting still works.'
+        : '';
+    }).catch(function () { hint.textContent = 'Could not list output devices.'; });
+  }
 
   /* -------------------------------------------------------------------------
    * 6. TIMER THROTTLING WHEN HIDDEN
@@ -363,6 +521,8 @@
     if (!alreadyLow()) setLowQuality(false);
     hookDiscordVideo();
     scheduleDiscord();
+    buildSettings();
+    applySink();
   }
   // Tidy up the Discord activity when the window/page goes away.
   window.addEventListener('beforeunload', function () { emit('ytmlite://clear'); });

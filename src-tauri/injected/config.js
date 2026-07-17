@@ -124,9 +124,12 @@ window.YTM_CFG = {
     ],
   },
 
-  /* localStorage keys used to remember one-time actions across launches. */
+  /* localStorage keys used to remember settings across launches. */
   storageKeys: {
     qualitySet: 'ytmLite.lowQualitySet.v1',
+    discordClientId: 'ytmLite.discordClientId.v1',
+    audioSink: 'ytmLite.audioSink.v1',
+    audioSinkLabel: 'ytmLite.audioSinkLabel.v1',
   },
 
   debug: false, // set true to see [ytm-lite] logs in DevTools console

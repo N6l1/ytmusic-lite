@@ -123,34 +123,41 @@ npm run icon         # = tauri icon app-icon.png
 
 ---
 
-## Discord Rich Presence (optional — "Listening to YouTube Music")
+## In-app Settings (gear icon)
+
+Click the **⚙ gear** button (bottom-right, above the player bar) to open Settings.
+Everything is saved on your device — no rebuild needed. Two options:
+
+### 1. Discord Application ID → "Listening to YouTube Music"
 
 Shows the song you're playing in your Discord activity, Spotify-style. It's
-**off by default** because it needs a (free) Discord Application ID. One-time setup:
+**off until you enter your own Application ID** (so nobody shares one ID):
 
 1. Go to <https://discord.com/developers/applications> → **New Application**.
 2. **Name it `YouTube Music`** — this name is what appears after "Listening to".
-   (Optional: under *Rich Presence → Art Assets*, upload a logo if you want a
-   fallback image.)
-3. On the **General Information** page, copy the **Application ID**.
-4. Paste it into `src-tauri/src/lib.rs`:
-   ```rust
-   const DISCORD_CLIENT_ID: &str = "your-application-id-here";
-   ```
-5. Rebuild (`npm run build`) and run. Make sure the **Discord desktop app** is
-   running (browser Discord won't work).
+   (Optional: under *Rich Presence → Art Assets*, upload a logo.)
+3. On **General Information**, copy the **Application ID**.
+4. Paste it into the **Discord Application ID** field in Settings. Done — it saves
+   instantly. Make sure the **Discord desktop app** is running (browser Discord
+   won't work).
 
-Now playing a song shows **Listening to YouTube Music**, with the track title,
-artist, cover art, and a live progress bar. Pausing removes the timer; closing
-the app clears it. Selectors for reading the track live in `config.js` under
-`discord`. If Discord isn't running, the feature simply stays idle.
+Playing a song now shows **Listening to YouTube Music** with the title, artist,
+cover art, and a live progress bar. Pausing removes the timer; closing clears it.
+Leave the field blank to disable Rich Presence.
 
-> How it works: the injected script emits a Tauri event (`ytmlite://presence`)
-> carrying the now-playing text; Rust listens for it and forwards it to your
-> local Discord. This uses only the core **event** permission granted to the
-> page in `src-tauri/capabilities/default.json` (app commands can't be granted
-> to a remote origin's ACL, so events are the correct channel). Leaving
-> `DISCORD_CLIENT_ID` empty disables the whole feature.
+### 2. Audio output device
+
+Pick which speakers/headphones YouTube Music plays through, independent of your
+system default — handy for routing music to one device. Uses the browser's
+`setSinkId`, so the choice sticks across tracks and launches.
+
+> How Rich Presence works under the hood: the injected script emits a Tauri
+> event (`ytmlite://presence`) carrying the now-playing text **and your saved
+> Application ID**; Rust listens and forwards it to your local Discord over its
+> IPC pipe. This uses only the core **event** permission granted to the page in
+> `src-tauri/capabilities/default.json` — app-defined commands can't be granted
+> to a remote origin's ACL, so events are the correct channel. The ID is stored
+> in the page's `localStorage`, never hardcoded in the binary.
 
 ---
 

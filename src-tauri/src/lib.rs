@@ -24,15 +24,11 @@ use tauri_plugin_window_state::{StateFlags, WindowExt};
 const WINDOW_LABEL: &str = "main";
 const HOME_URL: &str = "https://music.youtube.com";
 
-// ---------------------------------------------------------------------------
-// Discord Rich Presence ("Listening to YouTube Music" in your Discord activity)
-//
-// To enable: create a free Discord application at https://discord.com/developers
-// (name it "YouTube Music" — that name is what shows after "Listening to"), copy
-// its Application ID, and paste it below. Leave empty to disable the feature.
-// See README section "Discord Rich Presence" for the full 2-minute setup.
-// ---------------------------------------------------------------------------
-const DISCORD_CLIENT_ID: &str = "1527128686833307678";
+// Discord Rich Presence ("Listening to YouTube Music" in your Discord activity).
+// The Application ID is NOT hardcoded — each user enters their own in the in-app
+// Settings panel (gear icon). It's saved in the page's localStorage and rides
+// along in every presence event, so the app ships with the feature dormant until
+// an ID is set. See README section "Discord Rich Presence".
 
 // The two injected scripts are embedded at compile time. Edit the files in
 // `injected/` and rebuild to change behavior or fix selectors.
@@ -55,9 +51,13 @@ fn focus_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Holds the live Discord IPC connection (None until Discord is reachable).
+/// Holds the live Discord IPC connection plus the currently-configured
+/// Application ID (set by the user in the Settings panel, carried in events).
 #[derive(Default)]
-struct Discord(Mutex<Option<DiscordIpcClient>>);
+struct Discord {
+    client: Mutex<Option<DiscordIpcClient>>,
+    client_id: Mutex<String>,
+}
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -85,6 +85,8 @@ struct PresencePayload {
     art: Option<String>,
     position: Option<f64>,
     duration: Option<f64>,
+    #[serde(rename = "clientId", default)]
+    client_id: String,
 }
 
 /// Discord requires each presence string to be 2..=128 chars. Clamp/pad safely.
@@ -103,17 +105,34 @@ fn fit(s: &str) -> String {
 /// Publishes a Spotify-style "Listening to …" activity to the local Discord app.
 /// Driven by the `ytmlite://presence` event emitted from the page.
 fn set_presence(app: &tauri::AppHandle, p: PresencePayload) {
-    dlog(&format!("presence playing={} title={:?} artist={:?}", p.playing, p.title, p.artist));
-    if DISCORD_CLIENT_ID.is_empty() {
-        return; // feature disabled — no client id set
-    }
+    let client_id = p.client_id.trim().to_string();
+    dlog(&format!(
+        "presence playing={} title={:?} id={}chars",
+        p.playing,
+        p.title,
+        client_id.len()
+    ));
     let discord = app.state::<Discord>();
-    let mut guard = discord.0.lock().unwrap();
 
+    // If the configured Application ID changed (or was cleared), drop any
+    // existing connection so we reconnect with the new one.
+    {
+        let mut cur = discord.client_id.lock().unwrap();
+        if *cur != client_id {
+            *cur = client_id.clone();
+            *discord.client.lock().unwrap() = None;
+        }
+    }
+    if client_id.is_empty() {
+        *discord.client.lock().unwrap() = None;
+        return; // no Application ID set yet — feature dormant
+    }
+
+    let mut guard = discord.client.lock().unwrap();
     // (Re)establish the IPC connection if needed. If Discord isn't running this
     // just fails quietly and we retry on the next update.
     if guard.is_none() {
-        match DiscordIpcClient::new(DISCORD_CLIENT_ID) {
+        match DiscordIpcClient::new(&client_id) {
             Ok(mut c) => match c.connect() {
                 Ok(_) => {
                     dlog("discord connected");
@@ -176,7 +195,7 @@ fn set_presence(app: &tauri::AppHandle, p: PresencePayload) {
 /// Clears the Discord activity (nothing playing, or app closing).
 fn clear_presence(app: &tauri::AppHandle) {
     let discord = app.state::<Discord>();
-    let mut guard = discord.0.lock().unwrap();
+    let mut guard = discord.client.lock().unwrap();
     if let Some(client) = guard.as_mut() {
         let _ = client.clear_activity();
     }
