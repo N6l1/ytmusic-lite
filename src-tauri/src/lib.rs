@@ -265,6 +265,26 @@ pub fn run() {
                 .app_local_data_dir()
                 .expect("resolve app local data dir");
 
+            // First group = Tauri's own defaults (setting args replaces them).
+            // --use-fake-ui-for-media-stream auto-accepts the media permission
+            // prompt (WebView2 otherwise auto-DENIES it). That permission is what
+            // makes Chromium reveal audio output device names/ids, which the
+            // Settings panel needs for the output-device picker. It fakes only the
+            // permission UI — the devices themselves are real, and we only request
+            // it when you use that feature. See README "Audio output device".
+            let mut browser_args = String::from(
+                "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection \
+                 --use-fake-ui-for-media-stream",
+            );
+            // Also honor WebView2's standard env var, which Tauri would otherwise
+            // drop once we set args explicitly (handy for --remote-debugging-port).
+            if let Ok(extra) = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+                if !extra.trim().is_empty() {
+                    browser_args.push(' ');
+                    browser_args.push_str(extra.trim());
+                }
+            }
+
             // ---- Main window: load YT Music directly, inject our scripts ----
             let win = WebviewWindowBuilder::new(
                 app,
@@ -275,6 +295,7 @@ pub fn run() {
             .inner_size(1000.0, 720.0)
             .min_inner_size(480.0, 320.0)
             .data_directory(data_dir)
+            .additional_browser_args(&browser_args)
             .initialization_script(CONFIG_JS)
             .initialization_script(INJECT_JS)
             .build()?;

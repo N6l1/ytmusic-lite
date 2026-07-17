@@ -335,16 +335,36 @@
    *       • Discord Application ID (per-user; drives Rich Presence)
    *       • Audio output device (routes playback via HTMLMediaElement.setSinkId)
    * ---------------------------------------------------------------------- */
+  // Chromium hides audio-output device names/ids (and refuses non-default
+  // setSinkId) until the page holds media permission. Requesting it once unlocks
+  // both; we stop the stream immediately and never keep a mic open. Only called
+  // when you actually use the output-device feature.
+  var sinkUnlocked = false;
+  function unlockDevices() {
+    if (sinkUnlocked) return Promise.resolve();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.resolve();
+    return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
+      s.getTracks().forEach(function (t) { t.stop(); }); // release the mic at once
+      sinkUnlocked = true;
+    }).catch(function () {});
+  }
+
   function applySink() {
     var target = sGet(STK.audioSink) || 'default';
     var media = document.querySelectorAll('video, audio');
+    var need = [];
     for (var i = 0; i < media.length; i++) {
       var m = media[i];
-      if (typeof m.setSinkId !== 'function' || m.__ytmSink === target) continue;
-      (function (el, t) {
-        el.setSinkId(t).then(function () { el.__ytmSink = t; }).catch(function () {});
-      })(m, target);
+      if (typeof m.setSinkId === 'function' && m.__ytmSink !== target) need.push(m);
     }
+    if (!need.length) return;
+    // 'default' needs no permission; a specific device does.
+    var pre = target === 'default' ? Promise.resolve() : unlockDevices();
+    pre.then(function () {
+      need.forEach(function (el) {
+        el.setSinkId(target).then(function () { el.__ytmSink = target; }).catch(function () {});
+      });
+    });
   }
   window.__ytmLite.applySink = applySink;
 
@@ -413,6 +433,7 @@
       mk('label', { text: 'Audio output device' }),
       sink,
       sinkHint,
+      mk('div', { 'class': 'hint', text: 'Routes YouTube Music to a specific device. Listing devices needs microphone permission — Chromium hides device names otherwise. It is requested only here, and the mic is released immediately.' }),
       mk('div', { 'class': 'foot' }, [doneBtn]),
     ]);
     var ov = mk('div', { id: 'ytml-ov' }, [panel]);
@@ -459,7 +480,13 @@
       hint.textContent = 'This engine cannot switch output devices.';
       return;
     }
-    navigator.mediaDevices.enumerateDevices().then(function (devs) {
+    var loading = document.createElement('option');
+    loading.textContent = 'Detecting devices…';
+    sel.appendChild(loading);
+    // Unlock the real device list first (see unlockDevices).
+    unlockDevices().then(function () {
+      return navigator.mediaDevices.enumerateDevices();
+    }).then(function (devs) {
       var saved = sGet(STK.audioSink);
       while (sel.firstChild) sel.removeChild(sel.firstChild);
       var def = document.createElement('option');
@@ -467,7 +494,8 @@
       sel.appendChild(def);
       var labelled = false, n = 0;
       devs.forEach(function (d) {
-        if (d.kind !== 'audiooutput' || d.deviceId === 'default') return;
+        if (d.kind !== 'audiooutput') return;
+        if (d.deviceId === 'default' || d.deviceId === 'communications' || !d.deviceId) return;
         n++;
         var o = document.createElement('option');
         o.value = d.deviceId;
@@ -476,9 +504,9 @@
         sel.appendChild(o);
       });
       sel.value = saved;
-      hint.textContent = (n && !labelled)
-        ? 'Device names are hidden by the browser until permission is granted — selecting still works.'
-        : '';
+      hint.textContent = !n
+        ? 'No selectable output devices were found.'
+        : (labelled ? '' : 'Device names unavailable — selecting still works.');
     }).catch(function () { hint.textContent = 'Could not list output devices.'; });
   }
 

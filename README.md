@@ -148,8 +148,23 @@ Leave the field blank to disable Rich Presence.
 ### 2. Audio output device
 
 Pick which speakers/headphones YouTube Music plays through, independent of your
-system default — handy for routing music to one device. Uses the browser's
-`setSinkId`, so the choice sticks across tracks and launches.
+system default — e.g. route it to a GoXLR "Music" channel or a specific monitor.
+Uses `HTMLMediaElement.setSinkId`, reapplied on every track and remembered across
+launches.
+
+> **Why it asks for microphone permission.** Chromium refuses to reveal audio
+> **output** device names/ids (and refuses non-default `setSinkId`) unless the
+> page holds media permission — and WebView2 has no Speaker Selection API
+> (`selectAudioOutput` doesn't exist there) and auto-denies permission prompts.
+> So the app launches WebView2 with `--use-fake-ui-for-media-stream`, which
+> auto-accepts that prompt. It fakes only the *permission UI* — the devices are
+> real. The request is made **only when you open Settings**, and the mic stream is
+> stopped immediately; it's used purely to unlock the device list. The trade-off
+> is that music.youtube.com then holds microphone permission for the session.
+> Don't want that? Remove `--use-fake-ui-for-media-stream` from
+> `additional_browser_args` in `src-tauri/src/lib.rs` (the picker then can't list
+> devices) and use Windows' per-app routing instead:
+> **Settings → System → Sound → Volume mixer → YTMusic Lite → Output device**.
 
 > How Rich Presence works under the hood: the injected script emits a Tauri
 > event (`ytmlite://presence`) carrying the now-playing text **and your saved
